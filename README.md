@@ -1,4 +1,4 @@
-# AI Bio-Security Threat Forecaster
+# AI-Enabled Bio-Security Threat Forecasting System: An Automated Approach to Monitoring Emerging Biological Risks
 
 This project was completed during the Apart Research def/acc hackathon. Its function is to outline the bio-security threats that could potentially happen given advancing AI capabilities. The idea is that automating the analysis of AI capabilities in relation to bio-security threats will ensure us to stay up to date and aware of future threats, allowing us to sufficient time to develop and deploy safeguards.
 
