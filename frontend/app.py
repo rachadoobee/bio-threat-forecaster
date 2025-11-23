@@ -58,6 +58,10 @@ st.sidebar.markdown("---")
 resp = requests.get(f"{API_URL}/threats")
 threats = resp.json() if resp.ok else []
 
+# Fetch items
+resp_items = requests.get(f"{API_URL}/items", params={"limit": 9999})
+items = resp_items.json() if resp_items.ok else []
+
 # ============ MAIN DASHBOARD ============
 
 if not threats:
@@ -70,61 +74,159 @@ else:
     avg_score = sum(t.get("feasibility_score", 1) for t in threats) / len(threats)
     increasing = sum(1 for t in threats if "increasing" in t.get("trend", ""))
     
-    m1, m2, m3, m4, m5 = st.columns(5)
+    m1, m2, m3, m4, m5, m6 = st.columns(6)
     m1.metric("Total Threats Tracked", len(threats))
-    m2.metric("🔴 Critical", levels.count("critical"))
-    m3.metric("🟠 High", levels.count("high"))
-    m4.metric("📈 Increasing Trends", increasing)
-    m5.metric("Avg Feasibility", f"{avg_score:.1f}/5")
+    m2.metric("📄 Items Tracked", len(items))
+    m3.metric("🔴 Critical", levels.count("critical"))
+    m4.metric("🟠 High", levels.count("high"))
+    m5.metric("📈 Increasing Trends", increasing)
+    m6.metric("Avg Feasibility", f"{avg_score:.1f}/5")
     
     st.markdown("---")
+
+        #  ============ THREAT TIMELINE VISUALIZATION ============
+
+    st.markdown("---")
+    col1, col2 = st.columns(2)
     
-    # ============ THREAT TIMELINE VISUALIZATION ============
-    st.subheader("🕐 Threat Timeline Forecast")
+    with col1:
+        # ============ FUTURE THREATS ============
+        st.subheader("🕐 Threat Timeline Forecast")
+        
+        # Parse timeline estimates into approximate months
+        def parse_timeline(t):
+            tl = t.get("timeline_estimate", "Unknown")
+            if not tl or tl == "Unknown":
+                return 36  # Default to 3 years if unknown
+            # Try to extract numbers
+            import re
+            nums = re.findall(r'\d+', tl)
+            if nums:
+                return int(nums[0])
+            if "current" in tl.lower():
+                return 0
+            return 24
+        
+        timeline_data = []
+
+        impact_rank = {
+            "critical": 4,
+            "high": 3,
+            "medium": 2,
+            "low": 1
+        }
+
+
+        for t in threats:
+            months = parse_timeline(t)
+            if months == 0:
+                continue
+            timeline_data.append({
+                "Threat": t["name"][:40] + "..." if len(t["name"]) > 40 else t["name"],
+                "Months Until Feasible": months,
+                "Feasibility Score": t.get("feasibility_score", 1),
+                "Level": t.get("threat_level", "low"),
+                "Category": t.get("category", "Unknown")
+            })
+        
+        df_timeline = pd.DataFrame(timeline_data)
+        df_timeline["Impact Rank"] = df_timeline["Level"].map(impact_rank)
+        
+        df_timeline = df_timeline.sort_values(
+            by=["Impact Rank","Months Until Feasible"],
+            ascending=[False, False]
+        )
+
+        print(df_timeline)
+
+        # Color map
+        color_map = {"critical": "#ff4b4b", "high": "#ffa500", "medium": "#ffd700", "low": "#90EE90"}
+        df_timeline["Color"] = df_timeline["Level"].map(color_map)
+        
+        fig_timeline = px.bar(
+            df_timeline.sort_values(by = "Months Until Feasible", ascending=False),
+            x="Months Until Feasible",
+            y="Threat",
+            orientation="h",
+            color="Level",
+            color_discrete_map=color_map,
+            title="Estimated Time Until Threat Becomes Feasible",
+            hover_data=["Category", "Feasibility Score"]
+        )
+        fig_timeline.update_layout(height=max(400, len(threats) * 40), showlegend=True)
+        st.plotly_chart(fig_timeline, use_container_width=True)
     
-    # Parse timeline estimates into approximate months
-    def parse_timeline(t):
-        tl = t.get("timeline_estimate", "Unknown")
-        if not tl or tl == "Unknown":
-            return 36  # Default to 3 years if unknown
-        # Try to extract numbers
-        import re
-        nums = re.findall(r'\d+', tl)
-        if nums:
-            return int(nums[0])
-        if "current" in tl.lower():
-            return 0
-        return 24
-    
-    timeline_data = []
-    for t in threats:
-        months = parse_timeline(t)
-        timeline_data.append({
-            "Threat": t["name"][:40] + "..." if len(t["name"]) > 40 else t["name"],
-            "Months Until Feasible": months,
-            "Feasibility Score": t.get("feasibility_score", 1),
-            "Level": t.get("threat_level", "low"),
-            "Category": t.get("category", "Unknown")
-        })
-    
-    df_timeline = pd.DataFrame(timeline_data)
-    
-    # Color map
-    color_map = {"critical": "#ff4b4b", "high": "#ffa500", "medium": "#ffd700", "low": "#90EE90"}
-    df_timeline["Color"] = df_timeline["Level"].map(color_map)
-    
-    fig_timeline = px.bar(
-        df_timeline.sort_values("Months Until Feasible"),
-        x="Months Until Feasible",
-        y="Threat",
-        orientation="h",
-        color="Level",
-        color_discrete_map=color_map,
-        title="Estimated Time Until Threat Becomes Feasible",
-        hover_data=["Category", "Feasibility Score"]
-    )
-    fig_timeline.update_layout(height=max(400, len(threats) * 40), showlegend=True)
-    st.plotly_chart(fig_timeline, use_container_width=True)
+    with col2:
+        # ============ CURRENT THREATS ============
+        st.subheader("🟣 Currently Feasible Threats (With Evidence)")
+
+        def is_current(t):
+            tl = t.get("timeline_estimate", "").lower()
+            return (
+                "current" in tl
+                or "now" in tl
+                or tl.strip() in ["0", "0 months", "0-3 months"]
+            )
+
+        # Filter threats that are:
+        # 1. Feasible now
+        # 2. Have at least one related paper
+        current_threats = [
+            t for t in threats
+            if is_current(t) and t.get("recent_items_count", 0) > 0
+        ]
+
+        if not current_threats:
+            st.info("No currently-feasible threats with supporting papers.")
+        else:
+            for threat in current_threats:
+                level = threat.get("threat_level", "low")
+                level_emoji = {
+                    "critical": "🔴",
+                    "high": "🟠",
+                    "medium": "🟡",
+                    "low": "🟢"
+                }.get(level, "⚪")
+
+                trend_emoji = {
+                    "rapidly_increasing": "⬆️⬆️",
+                    "increasing": "⬆️",
+                    "stable": "➡️",
+                    "decreasing": "⬇️",
+                }.get(threat.get("trend", "stable"), "➡️")
+
+                with st.expander(
+                    f"{level_emoji} **{threat['name']}** "
+                    f"| Score: {threat.get('feasibility_score', 0):.1f}/5 "
+                    f"| {trend_emoji}"
+                ):
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("Feasibility", f"{threat.get('feasibility_score', 0):.1f}/5")
+                    c2.metric("Confidence", f"{threat.get('confidence', 0):.0%}")
+                    c3.metric("Related Papers", threat.get("recent_items_count", 0))
+
+                    st.markdown(f"**Category:** {threat.get('category', 'N/A')}")
+                    st.markdown(f"**Description:** {threat.get('description', 'No description available')}")
+                    st.markdown(f"**Timeline:** {threat.get('timeline_estimate', 'Unknown')}")
+                    st.markdown(f"**Last Updated:** {threat.get('last_updated', 'Never')}")
+
+                    # Button to show related papers
+                    if st.button(
+                        f"📄 Show Related Papers ({threat.get('recent_items_count', 0)})",
+                        key=f"papers_current_{threat['id']}"
+                    ):
+                        with st.spinner("Loading papers..."):
+                            detail_resp = requests.get(f"{API_URL}/threats/{threat['id']}")
+                            if detail_resp.ok:
+                                detail = detail_resp.json()
+                                papers = detail.get("related_papers", [])
+                                if papers:
+                                    st.markdown("### 📚 Related Papers")
+                                    for paper in papers:
+                                        st.markdown(f"- **{paper['title']}**")
+                                else:
+                                    st.info("This threat has no related papers.")
+
     
     # ============ THREAT MATRIX ============
     st.markdown("---")
@@ -172,36 +274,37 @@ else:
     
     st.plotly_chart(fig_matrix, use_container_width=True)
     
-    # ============ CATEGORY BREAKDOWN ============
-    st.markdown("---")
-    col1, col2 = st.columns(2)
+
+    # # ============ CATEGORY BREAKDOWN ============
+    # st.markdown("---")
+    # col1, col2 = st.columns(2)
     
-    with col1:
-        st.subheader("📊 Threats by Category")
-        df_cat = pd.DataFrame(threats)
-        if "category" in df_cat.columns:
-            cat_counts = df_cat["category"].value_counts()
-            fig_cat = px.pie(values=cat_counts.values, names=cat_counts.index, hole=0.4)
-            st.plotly_chart(fig_cat, use_container_width=True)
+    # with col1:
+    #     st.subheader("📊 Threats by Category")
+    #     df_cat = pd.DataFrame(threats)
+    #     if "category" in df_cat.columns:
+    #         cat_counts = df_cat["category"].value_counts()
+    #         fig_cat = px.pie(values=cat_counts.values, names=cat_counts.index, hole=0.4)
+    #         st.plotly_chart(fig_cat, use_container_width=True)
     
-    with col2:
-        st.subheader("📈 Trend Distribution")
-        if threats:
-            trend_counts = pd.Series([t.get("trend", "stable") for t in threats]).value_counts()
-            trend_colors = {
-                "rapidly_increasing": "#ff4b4b",
-                "increasing": "#ffa500", 
-                "stable": "#808080",
-                "decreasing": "#90EE90"
-            }
-            fig_trend = px.bar(
-                x=trend_counts.index,
-                y=trend_counts.values,
-                color=trend_counts.index,
-                color_discrete_map=trend_colors
-            )
-            fig_trend.update_layout(showlegend=False, xaxis_title="Trend", yaxis_title="Count")
-            st.plotly_chart(fig_trend, use_container_width=True)
+    # with col2:
+    #     st.subheader("📈 Trend Distribution")
+    #     if threats:
+    #         trend_counts = pd.Series([t.get("trend", "stable") for t in threats]).value_counts()
+    #         trend_colors = {
+    #             "rapidly_increasing": "#ff4b4b",
+    #             "increasing": "#ffa500", 
+    #             "stable": "#808080",
+    #             "decreasing": "#90EE90"
+    #         }
+    #         fig_trend = px.bar(
+    #             x=trend_counts.index,
+    #             y=trend_counts.values,
+    #             color=trend_counts.index,
+    #             color_discrete_map=trend_colors
+    #         )
+    #         fig_trend.update_layout(showlegend=False, xaxis_title="Trend", yaxis_title="Count")
+    #         st.plotly_chart(fig_trend, use_container_width=True)
     
     # ============ DETAILED THREAT CARDS ============
     st.markdown("---")
