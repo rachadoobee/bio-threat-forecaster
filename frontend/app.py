@@ -221,11 +221,62 @@ else:
             c1, c2, c3 = st.columns(3)
             c1.metric("Feasibility", f"{threat.get('feasibility_score', 0):.1f}/5")
             c2.metric("Confidence", f"{threat.get('confidence', 0):.0%}")
-            c3.metric("Related Items", threat.get("recent_items_count", 0))
+            c3.metric("Related Papers", threat.get("recent_items_count", 0))
             
             st.markdown(f"**Category:** {threat.get('category', 'N/A')}")
             st.markdown(f"**Description:** {threat.get('description', 'No description')}")
             st.markdown(f"**Last Updated:** {threat.get('last_updated', 'Never')}")
+            
+            # Fetch detailed info with papers
+            if st.button(f"📄 Show Related Papers ({threat.get('recent_items_count', 0)})", key=f"papers_{threat['id']}"):
+                with st.spinner("Loading papers..."):
+                    detail_resp = requests.get(f"{API_URL}/threats/{threat['id']}")
+                    if detail_resp.ok:
+                        detail = detail_resp.json()
+                        papers = detail.get("related_papers", [])
+                        
+                        if papers:
+                            st.markdown("---")
+                            st.markdown("### 📚 Related Papers")
+                            
+                            for paper in papers:
+                                impact_colors = {
+                                    "step_change": "🔴",
+                                    "significant": "🟠", 
+                                    "incremental": "🟡",
+                                    "none": "⚪"
+                                }
+                                impact_icon = impact_colors.get(paper.get("impact_level", "none"), "⚪")
+                                
+                                with st.container():
+                                    st.markdown(f"**{impact_icon} {paper['title']}**")
+                                    
+                                    col1, col2 = st.columns([3, 1])
+                                    with col1:
+                                        if paper.get('authors'):
+                                            st.text(f"Authors: {paper['authors'][:100]}")
+                                        if paper.get('published_date'):
+                                            st.text(f"Published: {paper['published_date'][:10]}")
+                                        if paper.get('url'):
+                                            st.markdown(f"🔗 [View Paper]({paper['url']})")
+                                    
+                                    with col2:
+                                        st.metric("Impact", paper.get('impact_level', 'N/A'))
+                                        if paper.get('relevance_score'):
+                                            st.metric("Relevance", f"{paper['relevance_score']:.1%}")
+                                    
+                                    if paper.get('classification_reasoning'):
+                                        with st.expander("Why this is relevant"):
+                                            st.write(paper['classification_reasoning'])
+                                    
+                                    if paper.get('capabilities_identified'):
+                                        caps = paper['capabilities_identified']
+                                        if caps and caps != "[]":
+                                            st.text(f"Capabilities: {caps}")
+                                    
+                                    st.markdown("---")
+                        else:
+                            st.info("No related papers yet. Run ingestion and classification to find relevant papers.")
             
             if st.button(f"🔄 Update Assessment", key=f"upd_{threat['id']}"):
                 with st.spinner("Analyzing..."):
@@ -236,21 +287,112 @@ else:
 
 # ============ TABS FOR OTHER FUNCTIONS ============
 st.markdown("---")
-tab1, tab2, tab3 = st.tabs(["📰 Recent Items", "➕ Add Item", "⚙️ Setup"])
+tab1, tab2, tab3, tab4 = st.tabs(["📰 Recent Items", "📊 Papers by Threat", "➕ Add Item", "⚙️ Setup"])
 
 with tab1:
     st.subheader("Recently Ingested Items")
-    resp = requests.get(f"{API_URL}/items", params={"limit": 30})
+    
+    col1, col2 = st.columns(2)
+    show_relevant = col1.checkbox("Show only relevant", value=True)
+    limit = col2.slider("Number of items", 10, 100, 30)
+    
+    resp = requests.get(f"{API_URL}/items", params={"relevant_only": show_relevant, "limit": limit})
     if resp.ok:
         items = resp.json()
         if items:
-            for item in items[:20]:
+            for item in items:
                 rel_icon = "✅" if item.get("is_relevant") else "❌" if item.get("is_relevant") is False else "❓"
-                st.markdown(f"{rel_icon} **{item['title'][:80]}** | Impact: {item.get('impact_level', 'N/A')}")
+                impact_icon = {"step_change": "🔴", "significant": "🟠", "incremental": "🟡"}.get(item.get("impact_level"), "⚪")
+                
+                with st.expander(f"{rel_icon} {impact_icon} {item['title'][:80]}"):
+                    if item.get("url"):
+                        st.markdown(f"🔗 [View Source]({item['url']})")
+                    st.text(f"Impact: {item.get('impact_level', 'N/A')}")
+                    st.text(f"Classified: {'Yes' if item.get('classified') else 'No'}")
+                    st.text(f"Fetched: {item.get('fetched_at', 'Unknown')[:10]}")
         else:
             st.info("No items yet. Click 'Ingest' in the sidebar.")
 
 with tab2:
+    st.subheader("📊 Papers by Threat Category")
+    
+    if threats:
+        # Threat selector
+        threat_names = {t["id"]: t["name"] for t in threats}
+        selected_threat_id = st.selectbox(
+            "Select a threat to see related papers:",
+            options=list(threat_names.keys()),
+            format_func=lambda x: threat_names[x]
+        )
+        
+        if selected_threat_id:
+            with st.spinner("Loading papers..."):
+                detail_resp = requests.get(f"{API_URL}/threats/{selected_threat_id}")
+                
+                if detail_resp.ok:
+                    detail = detail_resp.json()
+                    papers = detail.get("related_papers", [])
+                    
+                    # Show threat info
+                    col1, col2, col3, col4 = st.columns(4)
+                    col1.metric("Feasibility", f"{detail['feasibility_score']:.1f}/5")
+                    col2.metric("Threat Level", detail['threat_level'])
+                    col3.metric("Timeline", detail['timeline_estimate'])
+                    col4.metric("Papers", len(papers))
+                    
+                    st.markdown("---")
+                    st.markdown(f"**Description:** {detail['description']}")
+                    
+                    # Show papers
+                    if papers:
+                        st.markdown("---")
+                        st.markdown(f"### {len(papers)} Related Papers")
+                        
+                        # Sort options
+                        sort_by = st.radio("Sort by:", ["Relevance", "Impact", "Date"], horizontal=True)
+                        
+                        if sort_by == "Relevance":
+                            papers = sorted(papers, key=lambda x: x.get("relevance_score", 0), reverse=True)
+                        elif sort_by == "Impact":
+                            impact_order = {"step_change": 3, "significant": 2, "incremental": 1, "none": 0}
+                            papers = sorted(papers, key=lambda x: impact_order.get(x.get("impact_level", "none"), 0), reverse=True)
+                        elif sort_by == "Date":
+                            papers = sorted(papers, key=lambda x: x.get("published_date", ""), reverse=True)
+                        
+                        for i, paper in enumerate(papers, 1):
+                            impact_colors = {"step_change": "🔴", "significant": "🟠", "incremental": "🟡", "none": "⚪"}
+                            impact_icon = impact_colors.get(paper.get("impact_level", "none"), "⚪")
+                            
+                            with st.container():
+                                st.markdown(f"#### {i}. {impact_icon} {paper['title']}")
+                                
+                                c1, c2, c3 = st.columns(3)
+                                c1.metric("Impact", paper.get('impact_level', 'N/A'))
+                                if paper.get('relevance_score'):
+                                    c2.metric("Relevance", f"{paper['relevance_score']:.0%}")
+                                if paper.get('published_date'):
+                                    c3.metric("Published", paper['published_date'][:10])
+                                
+                                if paper.get('authors'):
+                                    st.text(f"👥 {paper['authors'][:150]}")
+                                
+                                if paper.get('url'):
+                                    st.markdown(f"🔗 [View Paper]({paper['url']})")
+                                
+                                if paper.get('classification_reasoning'):
+                                    with st.expander("📝 Why this paper is relevant"):
+                                        st.write(paper['classification_reasoning'])
+                                
+                                if paper.get('capabilities_identified') and paper['capabilities_identified'] != "[]":
+                                    st.info(f"🔬 Capabilities: {paper['capabilities_identified']}")
+                                
+                                st.markdown("---")
+                    else:
+                        st.info("No papers linked to this threat yet. Run ingestion and classification to find relevant papers.")
+    else:
+        st.info("No threats defined yet. Add threats in the Setup tab.")
+
+with tab4:
     st.subheader("Add Item Manually")
     with st.form("manual_item"):
         title = st.text_input("Title")

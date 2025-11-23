@@ -94,6 +94,23 @@ async def get_threat(threat_id: int, db: Session = Depends(get_db)):
     if not threat:
         raise HTTPException(status_code=404, detail="Threat not found")
     
+    # Get all related items (relevant only)
+    related_items = [
+        {
+            "id": i.id,
+            "title": i.title,
+            "url": i.url,
+            "authors": i.authors,
+            "published_date": i.published_date.isoformat() if i.published_date else None,
+            "impact_level": i.impact_level,
+            "relevance_score": i.relevance_score,
+            "classification_reasoning": i.classification_reasoning,
+            "capabilities_identified": i.capabilities_identified,
+            "fetched_at": i.fetched_at.isoformat() if i.fetched_at else None
+        }
+        for i in threat.source_items if i.is_relevant
+    ]
+    
     return {
         "id": threat.id,
         "name": threat.name,
@@ -105,10 +122,8 @@ async def get_threat(threat_id: int, db: Session = Depends(get_db)):
         "timeline_estimate": threat.timeline_estimate,
         "confidence": threat.confidence,
         "enabling_capabilities": json.loads(threat.enabling_capabilities) if threat.enabling_capabilities else [],
-        "recent_items": [
-            {"id": i.id, "title": i.title, "impact": i.impact_level, "url": i.url}
-            for i in threat.source_items if i.is_relevant
-        ][-10:]
+        "related_papers": sorted(related_items, key=lambda x: x.get("relevance_score", 0), reverse=True),
+        "related_papers_count": len(related_items)
     }
 
 @app.post("/api/threats/{threat_id}/update")
