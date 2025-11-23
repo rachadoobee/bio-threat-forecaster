@@ -10,54 +10,7 @@ sys.path.append(".")
 import json
 from backend.models.database import init_db, SessionLocal, Threat, ThreatLevel, TrendDirection
 
-# ============================================================
-# EDIT YOUR THREAT CATEGORIES HERE
-# ============================================================
-
-# THREATS = [
-#     # Example structure - replace with your own categories
-#     {
-#         "name": "LLM-assisted pathogen design",
-#         "category": "AI-Enabled Knowledge Access",
-#         "description": "Large language models providing actionable guidance on pathogen design, synthesis routes, or enhancement strategies.",
-#         "enabling_capabilities": [
-#             "Advanced reasoning in biology",
-#             "Knowledge of virology and microbiology",
-#             "Wet lab protocol generation"
-#         ],
-#         "timeline_estimate": "Current - 12 months"
-#     },
-#     {
-#         "name": "Protein structure prediction misuse",
-#         "category": "Biological Design Tools",
-#         "description": "AI tools that predict protein structure being used to design novel toxins or enhance pathogen proteins.",
-#         "enabling_capabilities": [
-#             "Accurate structure prediction (AlphaFold-level)",
-#             "Inverse folding capabilities",
-#             "Function prediction from structure"
-#         ],
-#         "timeline_estimate": "Current"
-#     },
-#     {
-#         "name": "",
-#         "category": "Biological Design Tools",
-#         "description": "AI tools that predict protein structure being used to design novel toxins or enhance pathogen proteins.",
-#         "enabling_capabilities": [
-#             "Accurate structure prediction (AlphaFold-level)",
-#             "Inverse folding capabilities",
-#             "Function prediction from structure"
-#         ],
-#         "timeline_estimate": "Current"
-#     }
-#     # ADD YOUR OWN THREATS BELOW
-#     # {
-#     #     "name": "Your threat name",
-#     #     "category": "Your category",
-#     #     "description": "Description of the threat",
-#     #     "enabling_capabilities": ["cap1", "cap2"],
-#     #     "timeline_estimate": "X-Y months"
-#     # },
-# ]
+# Manually entered threats:
 
 THREATS = [
   {
