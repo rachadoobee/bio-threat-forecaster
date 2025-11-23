@@ -24,6 +24,10 @@ mkdir -p data
 ### 3. Initialize Database
 ```
 # Seed data sources
+
+mkdir data
+touch data/biosecurity.db
+
 python scripts/seed_sources.py
 
 # Edit scripts/seed_threats.py with YOUR threat categories, then:
