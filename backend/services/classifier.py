@@ -5,19 +5,19 @@ from sqlalchemy.orm import Session
 from backend.services.openrouter import get_llm_client
 from backend.models.database import SourceItem, Threat
 
-CLASSIFICATION_SYSTEM_PROMPT = """You are an AI and bio-security analyst expert assessing scientific papers and announcements for emerging AI capabilities and their relevance to future biological threats.
+CLASSIFICATION_SYSTEM_PROMPT = """You are a biosecurity threat analyst with expertise in AI capabilities and biological risks.
 
 Your task is to analyze content and determine:
-1. Whether it relates to any biosecurity threat categories
+1. Whether the AI capabilities relate to any biosecurity threat categories
 2. The potential impact on threat timelines
-3. Specific capabilities that are advancing
+3. Specific capabilities that are advancing that will have an affect on the listed biosecurity threats
 
-Be precise and conservative. You can flag items that have may have biosecurity relevance."""
+Be comprehensive but realistic. Avoid science fiction - focus on plausible threats based on current or near-future AI capabilities. You can flag items that will have biosecurity relevance."""
 
 
 def build_classification_prompt(item: SourceItem, threats: list[Threat]) -> str:
     threat_list = "\n".join([
-        f"- {t.name} ({t.category}): {t.description}"
+        f"- \"{t.name}\" (Category: {t.category})"
         for t in threats
     ])
     
@@ -33,17 +33,19 @@ PUBLISHED: {item.published_date or "Unknown"}
 
 ---
 
-THREAT CATEGORIES TO CHECK:
+THREAT CATEGORIES TO CHECK (use EXACT names from this list):
 {threat_list}
 
 ---
+
+IMPORTANT: For "related_threat_names", you MUST use the EXACT threat names from the list above (copy them exactly as shown in quotes).
 
 Respond with JSON:
 {{
     "is_relevant": true/false,
     "relevance_score": 0.0-1.0,
     "impact_level": "none" | "incremental" | "significant" | "step_change",
-    "related_threat_names": ["threat name 1", "threat name 2"],
+    "related_threat_names": ["exact threat name 1", "exact threat name 2"],
     "capabilities_identified": ["capability 1", "capability 2"],
     "reasoning": "Brief explanation of relevance and impact"
 }}"""
@@ -71,12 +73,22 @@ async def classify_item(db: Session, item: SourceItem) -> dict:
     item.capabilities_identified = str(result.get("capabilities_identified", []))
     item.classified_at = datetime.utcnow()
     
-    # Link to related threats
+    # Link to related threats (fuzzy matching)
     if result.get("related_threat_names"):
         for tname in result["related_threat_names"]:
+            # Try exact match first
             threat = db.query(Threat).filter(Threat.name == tname).first()
+            
+            # If no exact match, try fuzzy matching
+            if not threat:
+                # Try partial match (case-insensitive)
+                threat = db.query(Threat).filter(
+                    Threat.name.ilike(f"%{tname}%")
+                ).first()
+            
             if threat and threat not in item.related_threats:
                 item.related_threats.append(threat)
+                print(f"  🔗 Linked to threat: {threat.name}")
     
     db.commit()
     db.refresh(item)
